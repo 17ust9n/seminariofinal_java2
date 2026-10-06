@@ -19,6 +19,11 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.View;
+import java.util.HashMap;
+import java.util.Map;
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
@@ -132,14 +137,15 @@ public class OnboardingActivity extends AppCompatActivity {
 
         tvError.setVisibility(View.GONE);
 
-        // 1. Generar KeyPair de Sodium para el protocolo Diffie-Hellman / Box
-        // Es recomendable procesar esto fuera del Hilo de UI
         new Thread(() -> {
             try {
+                // 1. Generar claves de Sodium en segundo plano
                 LazySodiumAndroid sodium = SodiumManager.getInstance();
-                KeyPair keyPair = sodium.cryptoBoxKeypair(); // Claves para cifrado asimétrico
+                KeyPair keyPair = sodium.cryptoBoxKeypair();
+                String publicKeyHex = keyPair.getPublicKey().getAsHexString();
+                String secretKeyHex = keyPair.getSecretKey().getAsHexString();
 
-                // 2. Usar EncryptedSharedPreferences para almacenar claves y sesión de forma segura
+                // 2. Guardar claves de forma segura en local
                 MasterKey masterKey = new MasterKey.Builder(OnboardingActivity.this)
                         .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                         .build();
@@ -153,24 +159,45 @@ public class OnboardingActivity extends AppCompatActivity {
                 );
 
                 SharedPreferences.Editor secureEditor = securePrefs.edit();
-                secureEditor.putString("public_key", keyPair.getPublicKey().getAsHexString());
-                secureEditor.putString("secret_key", keyPair.getSecretKey().getAsHexString());
+                secureEditor.putString("public_key", publicKeyHex);
+                secureEditor.putString("secret_key", secretKeyHex);
                 secureEditor.apply();
 
-                // 3. Guardar estado general de la aplicación
-                SharedPreferences preferences = getSharedPreferences("starssenger_prefs", Context.MODE_PRIVATE);
-                SharedPreferences.Editor editor = preferences.edit();
-                editor.putString("user_name", name);
-                editor.putString("user_phone", phoneNumber);
-                editor.putInt("security_level", selectedSecurityLevel);
-                editor.putBoolean("is_logged_in", true);
-                editor.apply();
+                // 3. Enviar datos a Django para Iniciar Sesión / Registrar
+                ApiService apiService = ApiClient.getClient().create(ApiService.class);
 
-                // 4. Volver al UI Thread para navegar a MainActivity
-                runOnUiThread(() -> {
-                    Intent intent = new Intent(OnboardingActivity.this, MainActivity.class);
-                    startActivity(intent);
-                    finish();
+                Map<String, Object> loginData = new HashMap<>();
+                loginData.put("phone", phoneNumber);
+                loginData.put("name", name);
+                loginData.put("public_key", publicKeyHex);
+                loginData.put("security_level", selectedSecurityLevel);
+
+                apiService.login(loginData).enqueue(new Callback<Map<String, Object>>() {
+                    @Override
+                    public void onResponse(Call<Map<String, Object>> call, Response<Map<String, Object>> response) {
+                        if (response.isSuccessful() && response.body() != null) {
+                            // Django respondió OK y ApiClient guardó la cookie 'sessionid' automáticamente
+
+                            SharedPreferences preferences = getSharedPreferences("starssenger_prefs", Context.MODE_PRIVATE);
+                            SharedPreferences.Editor editor = preferences.edit();
+                            editor.putString("user_name", name);
+                            editor.putString("user_phone", phoneNumber);
+                            editor.putInt("security_level", selectedSecurityLevel);
+                            editor.putBoolean("is_logged_in", true);
+                            editor.apply();
+
+                            Intent intent = new Intent(OnboardingActivity.this, MainActivity.class);
+                            startActivity(intent);
+                            finish();
+                        } else {
+                            showError("Error al conectar con el servidor: " + response.code());
+                        }
+                    }
+
+                    @Override
+                    public void onFailure(Call<Map<String, Object>> call, Throwable t) {
+                        showError("No se pudo conectar con Django: " + t.getMessage());
+                    }
                 });
 
             } catch (Exception e) {

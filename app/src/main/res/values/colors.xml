@@ -7,6 +7,7 @@
     <color name="green_text">#04240F</color>
     <color name="mut_text">#8AA0B3</color>
     <color name="mut">#8AA0B3</color>
+    <color name="line">#24455F</color>
     <color name="line_border">#24455F</color>
     <color name="red_accent">#C0392B</color>
     <color name="white">#EAF2F8</color>

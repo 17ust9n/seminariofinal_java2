@@ -2,6 +2,7 @@ package com.example.seminariofinal;
 
 import android.app.Dialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -49,6 +50,9 @@ public class NewChatActivity extends AppCompatActivity {
     private ContactAdapter adapter;
     private final Gson gson = new Gson();
 
+    // Referencia al diálogo activo de llamada entrante
+    private AlertDialog incomingCallDialog;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -66,6 +70,74 @@ public class NewChatActivity extends AppCompatActivity {
         renderGroups();
     }
 
+    private SharedPreferences getGetPreferencesShared() {
+        return getSharedPreferences("starssenger_prefs", MODE_PRIVATE);
+    }
+
+    private Boolean isValidSodiumKey(String key) {
+        return key != null && key.length() == 64 && key.matches("^[0-9a-fA-F]+$");
+    }
+
+    private Dialog createStyledDialog(int layoutResId) {
+        Dialog dialog = new Dialog(this);
+        dialog.setContentView(layoutResId);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        return dialog;
+    }
+
+    private void saveContact(String name, String phone, String pubKey) {
+        Contact newContact = new Contact(name, phone, pubKey);
+        contactList.add(newContact);
+        saveContactsToPrefs();
+        renderNewChat(etNcSearch.getText().toString());
+        Toast.makeText(this, "Contacto guardado exitosamente 💾", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Muestra el diálogo de llamada entrante con opciones de contestar o rechazar.
+     */
+    public void showIncomingCallDialog(String callerName) {
+        if (isFinishing() || isDestroyed()) return;
+
+        // Si ya hay una llamada en pantalla, se cierra la previa
+        if (incomingCallDialog != null && incomingCallDialog.isShowing()) {
+            incomingCallDialog.dismiss();
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Llamada entrante")
+                .setMessage(callerName + " te está llamando")
+                .setCancelable(false) // Impide cerrar al tocar fuera
+                .setPositiveButton("Contestar", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        acceptCall(callerName);
+                    }
+                })
+                .setNegativeButton("Rechazar", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        rejectCall(callerName);
+                    }
+                });
+
+        incomingCallDialog = builder.create();
+        incomingCallDialog.show();
+    }
+
+    private void acceptCall(String callerName) {
+        Toast.makeText(this, "Llamada aceptada de " + callerName, Toast.LENGTH_SHORT).show();
+        // TODO: Iniciar la Activity de llamada o conectar stream WebRTC
+    }
+
+    private void rejectCall(String callerName) {
+        Toast.makeText(this, "Llamada rechazada", Toast.LENGTH_SHORT).show();
+        // TODO: Enviar señal de rechazo al backend/socket
+    }
+
     private void initViews() {
         toolbarNewChat = findViewById(R.id.toolbarNewChat);
         toolbarNewChat.setNavigationIcon(R.drawable.ic_arrow_back);
@@ -81,7 +153,6 @@ public class NewChatActivity extends AppCompatActivity {
 
         rvNcList.setLayoutManager(new LinearLayoutManager(this));
 
-        // Configura el listener pasándole de forma nativa la flag de grupo a ChatActivity
         adapter = new ContactAdapter(new ArrayList<>(), true, new OnContactActionListener() {
             @Override
             public void onContactClick(Contact contact) {
@@ -90,10 +161,7 @@ public class NewChatActivity extends AppCompatActivity {
                 intent.putExtra("contact_name", contact.getName());
                 intent.putExtra("contact_phone", contact.getPhone());
                 intent.putExtra("contact_public_key", contact.getPublicKey());
-
-                // Mapeo dinámico para unificar el comportamiento con el Home (MainActivity)
                 intent.putExtra("is_group", contact.isGroup());
-
                 startActivity(intent);
             }
 
@@ -231,12 +299,10 @@ public class NewChatActivity extends AppCompatActivity {
 
     private void setupMemberCheckbox(CheckBox cb, LinearLayout actionsLayout) {
         if (actionsLayout != null) {
-            // Ocultamos solo lo que NO es el checkbox (por ej. botones editar/borrar)
             for (int i = 0; i < actionsLayout.getChildCount(); i++) {
                 View child = actionsLayout.getChildAt(i);
                 if (child != cb) child.setVisibility(View.GONE);
             }
-            // Si el checkbox vive dentro del contenedor, el contenedor debe seguir visible
             boolean cbInside = actionsLayout.findViewById(R.id.cbMember) != null;
             actionsLayout.setVisibility(cbInside ? View.VISIBLE : View.GONE);
         }
@@ -261,7 +327,6 @@ public class NewChatActivity extends AppCompatActivity {
         return p == null ? "" : p.replaceAll("\\D", "");
     }
 
-    // excluded: el contacto que se está editando (null al crear uno nuevo)
     private boolean phoneAlreadyExists(String phone, Contact excluded) {
         String target = cleanPhone(phone);
         if (target.isEmpty()) return false;
@@ -531,7 +596,6 @@ public class NewChatActivity extends AppCompatActivity {
 
                     notifyItemChanged(position);
                     tvCounterLabel.setText("Miembros del Grupo (" + temporaryMembers.size() + " seleccionados)");
-                    // Si había un error marcado en rojo, volvemos al color normal
                     tvCounterLabel.setTextColor(ContextCompat.getColor(ctx, R.color.green_accent));
                 };
 
@@ -551,7 +615,6 @@ public class NewChatActivity extends AppCompatActivity {
         builder.setTitle("Modificar Grupo 👥");
         builder.setView(modalLayout);
 
-        // El listener real se asigna después de show() para poder evitar que el diálogo se cierre solo
         builder.setPositiveButton("Guardar cambios 💾", null);
         builder.setNegativeButton("Cancelar", null);
 
@@ -639,7 +702,6 @@ public class NewChatActivity extends AppCompatActivity {
         Button btnCancel = dialog.findViewById(R.id.btnCancelCreateGroup);
         Button btnSave = dialog.findViewById(R.id.btnSaveCreateGroup);
 
-        // Guardamos el color original del contador para restaurarlo luego de un error
         final int counterOriginalColor = tvCounterLabel != null
                 ? tvCounterLabel.getCurrentTextColor()
                 : ContextCompat.getColor(this, R.color.green_accent);
@@ -702,7 +764,6 @@ public class NewChatActivity extends AppCompatActivity {
                         notifyItemChanged(position);
                         if (tvCounterLabel != null) {
                             tvCounterLabel.setText("Seleccionar Miembros (" + selectedMembers.size() + " seleccionados)");
-                            // Si había un error marcado en rojo, volvemos al color original
                             tvCounterLabel.setTextColor(counterOriginalColor);
                         }
                     };
@@ -715,59 +776,34 @@ public class NewChatActivity extends AppCompatActivity {
             };
             rvModalList.setAdapter(modalAdapter);
         }
+
         if (btnCancel != null) btnCancel.setOnClickListener(v -> dialog.dismiss());
         if (btnSave != null) {
             btnSave.setOnClickListener(v -> {
                 String groupName = etGroupNameInput != null ? etGroupNameInput.getText().toString().trim() : "";
                 if (groupName.isEmpty()) {
-                    Toast.makeText(this, "Completa el nombre del grupo", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                if (selectedMembers.isEmpty()) {
+                    Toast.makeText(this, "Ingresá un nombre para el grupo", Toast.LENGTH_SHORT).show();
+                } else if (selectedMembers.isEmpty()) {
                     if (tvCounterLabel != null) {
                         tvCounterLabel.setTextColor(Color.parseColor("#e05a5a"));
                     }
-                    Toast.makeText(this, "Seleccioná al menos un miembro para el grupo", Toast.LENGTH_SHORT).show();
-                    return;
+                    Toast.makeText(this, "Seleccioná al menos un miembro", Toast.LENGTH_SHORT).show();
+                } else {
+                    saveNewGroupToPrefs(groupName, selectedMembers);
+                    dialog.dismiss();
                 }
-                saveNewGroupToPrefs(groupName, selectedMembers);
-                dialog.dismiss();
             });
         }
         dialog.show();
-    }
-
-    private SharedPreferences getGetPreferencesShared() {
-        return getSharedPreferences("starssenger_prefs", MODE_PRIVATE);
-    }
-
-    private void saveContact(String name, String num, String pubKey) {
-        Contact newContact = new Contact(name, num, pubKey);
-        contactList.add(newContact);
-        saveContactsToPrefs();
-        renderNewChat(etNcSearch.getText().toString());
-        Toast.makeText(this, "Contacto guardado correctamente", Toast.LENGTH_SHORT).show();
-    }
-
-    private boolean isValidSodiumKey(String key) {
-        return key != null && key.length() == 64 && key.matches("^[0-9a-fA-F]+$");
-    }
-
-    private Dialog createStyledDialog(int layoutResId) {
-        Dialog dialog = new Dialog(this);
-        dialog.setContentView(layoutResId);
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        }
-        return dialog;
     }
 
     private void hideKeyboard() {
         View view = this.getCurrentFocus();
         if (view != null) {
             InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (imm != null) imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
+            if (imm != null) {
+                imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
+            }
         }
     }
 }

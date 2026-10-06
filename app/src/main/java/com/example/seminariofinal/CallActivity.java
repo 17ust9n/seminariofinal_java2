@@ -1,6 +1,7 @@
 package com.example.seminariofinal;
 
 import android.app.Dialog;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
@@ -16,6 +17,12 @@ import com.goterl.lazysodium.utils.Key;
 import com.goterl.lazysodium.utils.KeyPair;
 
 import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
+
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
 
 public class CallActivity extends AppCompatActivity {
 
@@ -96,7 +103,6 @@ public class CallActivity extends AppCompatActivity {
     }
 
     private void generateEphemeralKeys() {
-        // Generar llaves efímeras para Perfect Forward Secrecy
         new Thread(() -> {
             try {
                 LazySodiumAndroid sodium = SodiumManager.getInstance();
@@ -124,19 +130,31 @@ public class CallActivity extends AppCompatActivity {
         layoutInCall.setVisibility(View.GONE);
         tvVfState.setText("Conectando de forma segura...");
 
-        // Derivar clave de sesión usando la clave pública del interlocutor
+        SharedPreferences prefs = getSharedPreferences("starssenger_prefs", MODE_PRIVATE);
+        String myPhone = prefs.getString("user_phone", "");
+
+        ApiService apiService = ApiClient.getClient().create(ApiService.class);
+        Map<String, Object> body = new HashMap<>();
+        body.put("caller_phone", contactPhone);
+        body.put("receiver_phone", myPhone);
+        body.put("action", "accept");
+
+        apiService.respondCall(body).enqueue(new Callback<Map<String, Object>>() {
+            @Override
+            public void onResponse(Call<Map<String, Object>> call, Response<Map<String, Object>> response) {}
+
+            @Override
+            public void onFailure(Call<Map<String, Object>> call, Throwable t) {}
+        });
+
         new Thread(() -> {
             try {
                 if (contactPublicKey != null && !contactPublicKey.isEmpty() && ephemeralKeyPair != null) {
                     LazySodiumAndroid sodium = SodiumManager.getInstance();
 
-                    // 1. Convertir la clave pública recibida en formato Hex
                     Key remotePubKey = Key.fromHexString(contactPublicKey);
-
-                    // 2. Crear array para almacenar la clave precalculada (32 bytes)
                     sessionKey = new byte[Box.BEFORENMBYTES];
 
-                    // 3. Ejecutar el Handshake ECDH (X25519) usando cryptoBoxBeforeNm (retorna boolean)
                     boolean success = sodium.cryptoBoxBeforeNm(
                             sessionKey,
                             remotePubKey.getAsBytes(),
@@ -145,8 +163,6 @@ public class CallActivity extends AppCompatActivity {
 
                     if (success) {
                         runOnUiThread(() -> tvVfState.setText("En llamada (E2EE 🔒)"));
-
-                        // 4. Iniciar la grabación de la llamada
                         audioRecorderHelper.startRecording(tempWavPath);
                     } else {
                         runOnUiThread(() -> tvVfState.setText("En llamada (Sin cifrar)"));
@@ -168,6 +184,23 @@ public class CallActivity extends AppCompatActivity {
     }
 
     private void declineCall() {
+        SharedPreferences prefs = getSharedPreferences("starssenger_prefs", MODE_PRIVATE);
+        String myPhone = prefs.getString("user_phone", "");
+
+        ApiService apiService = ApiClient.getClient().create(ApiService.class);
+        Map<String, Object> body = new HashMap<>();
+        body.put("caller_phone", contactPhone);
+        body.put("receiver_phone", myPhone);
+        body.put("action", "reject");
+
+        apiService.respondCall(body).enqueue(new Callback<Map<String, Object>>() {
+            @Override
+            public void onResponse(Call<Map<String, Object>> call, Response<Map<String, Object>> response) {}
+
+            @Override
+            public void onFailure(Call<Map<String, Object>> call, Throwable t) {}
+        });
+
         cleanUpSession();
         layoutInCall.setVisibility(View.GONE);
         finish();
@@ -176,16 +209,13 @@ public class CallActivity extends AppCompatActivity {
     private void stopAndEncryptAudio() {
         if (sessionKey != null && callNonce != null) {
             Key keyObject = Key.fromBytes(sessionKey);
-            // Detiene grabación, compila el WAV y lo cifra con la clave de sesión E2EE derivada
             audioRecorderHelper.stopRecording(tempWavPath, keyObject, callNonce, encryptedAudioPath);
         } else {
-            // Si la llamada no fue cifrada, detiene sin generar cifrado final
             audioRecorderHelper.stopRecording(tempWavPath, null, null, null);
         }
     }
 
     private void cleanUpSession() {
-        // Borrar claves efímeras de la memoria para proteger la privacidad tras colgar
         if (sessionKey != null) {
             java.util.Arrays.fill(sessionKey, (byte) 0);
             sessionKey = null;

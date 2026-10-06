@@ -60,6 +60,26 @@
                 android:textColor="@color/mut_text"
                 android:textSize="12sp" />
         </LinearLayout>
+
+        <!-- Llamada de voz -->
+        <ImageButton
+            android:id="@+id/btnVoiceCall"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_call"
+            app:tint="@color/green_accent"
+            android:contentDescription="Llamada de voz" />
+
+        <!-- Videollamada -->
+        <ImageButton
+            android:id="@+id/btnVideoCall"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_videocam"
+            app:tint="@color/green_accent"
+            android:contentDescription="Videollamada" />
     </LinearLayout>
 
     <!-- Barra Inferior de Entrada (#bar) -->

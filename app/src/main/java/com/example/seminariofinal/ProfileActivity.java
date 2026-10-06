@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
+
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKey;
@@ -25,11 +26,14 @@ public class ProfileActivity extends AppCompatActivity {
     private ShapeableImageView imgProfilePicture;
     private TextView tvUserName;
     private TextView tvUserEmail;
+
     private Button btnEditProfile;
+    private Button btnCallHistory;
     private Button btnSettings;
     private Button btnTerms;
     private Button btnAbout;
     private Button btnLogout;
+
     private BottomNavigationView bottomNavigation;
 
     private LazySodiumAndroid sodium;
@@ -40,7 +44,6 @@ public class ProfileActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_profile);
 
-        // Instancia de Sodium
         sodium = SodiumManager.getInstance();
 
         initViews();
@@ -51,7 +54,6 @@ public class ProfileActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Recargar datos cuando el usuario regresa de Editar Perfil o Ajustes
         loadUserData();
     }
 
@@ -60,51 +62,67 @@ public class ProfileActivity extends AppCompatActivity {
         imgProfilePicture = findViewById(R.id.imgProfilePicture);
         tvUserName = findViewById(R.id.tvUserName);
         tvUserEmail = findViewById(R.id.tvUserEmail);
+
         btnEditProfile = findViewById(R.id.btnEditProfile);
+        btnCallHistory = findViewById(R.id.btnCallHistory);
         btnSettings = findViewById(R.id.btnSettings);
         btnTerms = findViewById(R.id.btnTerms);
         btnAbout = findViewById(R.id.btnAbout);
         btnLogout = findViewById(R.id.btnLogout);
-        bottomNavigation = findViewById(R.id.bottomNavigation);
 
+        bottomNavigation = findViewById(R.id.bottomNavigation);
         bottomNavigation.setSelectedItemId(R.id.nav_profile);
     }
 
     private void loadUserData() {
-        // 1. Datos generales de preferencias comunes
-        SharedPreferences preferences = getSharedPreferences("starssenger_prefs", Context.MODE_PRIVATE);
+        SharedPreferences preferences =
+                getSharedPreferences("starssenger_prefs", Context.MODE_PRIVATE);
 
         String userName = preferences.getString("user_name", "");
         String userPhone = preferences.getString("user_phone", "Sin número");
+
         int secLevel = preferences.getInt("security_level", 0);
-        String secLabel = (secLevel == 1) ? "Modo Blindado 🛡️" : "Modo Normal ⚡";
+        String secLabel = (secLevel == 1)
+                ? "Modo Blindado 🛡️"
+                : "Modo Normal ⚡";
 
-        // Arriba va el nombre. Si no existe (usuarios creados antes del cambio), se muestra el teléfono.
-        tvUserName.setText(userName.isEmpty() ? userPhone : userName);
+        tvUserName.setText(
+                userName.isEmpty() ? userPhone : userName
+        );
 
-        // 2. Leer o generar par de claves Curve25519 con Libsodium en EncryptedSharedPreferences
         try {
             MasterKey masterKey = new MasterKey.Builder(this)
                     .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                     .build();
 
-            SharedPreferences securePrefs = EncryptedSharedPreferences.create(
-                    this,
-                    "starssenger_secure_prefs",
-                    masterKey,
-                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            );
+            SharedPreferences securePrefs =
+                    EncryptedSharedPreferences.create(
+                            this,
+                            "starssenger_secure_prefs",
+                            masterKey,
+                            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                    );
 
-            // Mismo nombre de clave que usa OnboardingActivity: "secret_key"
-            myPublicKeyHex = securePrefs.getString("public_key", null);
-            String secretKeyHex = securePrefs.getString("secret_key", null);
+            myPublicKeyHex =
+                    securePrefs.getString("public_key", null);
 
-            // Generar par de claves con Libsodium solo si aún no existen
+            String secretKeyHex =
+                    securePrefs.getString("secret_key", null);
+
+            /*
+             * Si todavía no existe la identidad criptográfica,
+             * generamos el par de claves con Lazysodium.
+             */
             if (myPublicKeyHex == null || secretKeyHex == null) {
+
                 KeyPair keyPair = sodium.cryptoBoxKeypair();
-                myPublicKeyHex = keyPair.getPublicKey().getAsHexString();
-                secretKeyHex = keyPair.getSecretKey().getAsHexString();
+
+                myPublicKeyHex =
+                        keyPair.getPublicKey().getAsHexString();
+
+                secretKeyHex =
+                        keyPair.getSecretKey().getAsHexString();
 
                 securePrefs.edit()
                         .putString("public_key", myPublicKeyHex)
@@ -112,101 +130,192 @@ public class ProfileActivity extends AppCompatActivity {
                         .apply();
             }
 
-            // Formatear la vista previa de la clave pública
-            String shortKey = (myPublicKeyHex.length() > 16)
-                    ? myPublicKeyHex.substring(0, 8) + "..." + myPublicKeyHex.substring(myPublicKeyHex.length() - 8)
-                    : myPublicKeyHex;
+            String shortKey;
 
-            // Abajo va el número, el modo de seguridad y la clave pública
-            String subtext = userPhone + "\n" + secLabel + "\nClave Pública (Toca para copiar):\n" + shortKey;
+            if (myPublicKeyHex.length() > 16) {
+                shortKey =
+                        myPublicKeyHex.substring(0, 8)
+                                + "..."
+                                + myPublicKeyHex.substring(
+                                myPublicKeyHex.length() - 8
+                        );
+            } else {
+                shortKey = myPublicKeyHex;
+            }
+
+            String subtext =
+                    userPhone
+                            + "\n"
+                            + secLabel
+                            + "\nClave Pública (Toca para copiar):\n"
+                            + shortKey;
+
             tvUserEmail.setText(subtext);
 
         } catch (Exception e) {
             e.printStackTrace();
-            tvUserEmail.setText(userPhone + "\n" + secLabel + "\nError al cargar identidad Libsodium");
+
+            tvUserEmail.setText(
+                    userPhone
+                            + "\n"
+                            + secLabel
+                            + "\nError al cargar identidad Libsodium"
+            );
         }
     }
 
     private void setupListeners() {
-        // Permite al usuario copiar su clave pública al portapapeles
+
         tvUserEmail.setOnClickListener(v -> {
-            if (myPublicKeyHex != null && !myPublicKeyHex.isEmpty()) {
-                ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                ClipData clip = ClipData.newPlainText("Clave Pública Libsodium", myPublicKeyHex);
+
+            if (myPublicKeyHex != null
+                    && !myPublicKeyHex.isEmpty()) {
+
+                ClipboardManager clipboard =
+                        (ClipboardManager)
+                                getSystemService(Context.CLIPBOARD_SERVICE);
+
+                ClipData clip =
+                        ClipData.newPlainText(
+                                "Clave Pública Libsodium",
+                                myPublicKeyHex
+                        );
+
                 if (clipboard != null) {
                     clipboard.setPrimaryClip(clip);
-                    Toast.makeText(this, "¡Clave pública copiada al portapapeles!", Toast.LENGTH_SHORT).show();
+
+                    Toast.makeText(
+                            this,
+                            "¡Clave pública copiada al portapapeles!",
+                            Toast.LENGTH_SHORT
+                    ).show();
                 }
             }
         });
 
-        // Abrir la pantalla de Editar Perfil
         btnEditProfile.setOnClickListener(v -> {
-            Intent intent = new Intent(ProfileActivity.this, EditProfileActivity.class);
+            Intent intent =
+                    new Intent(
+                            ProfileActivity.this,
+                            EditProfileActivity.class
+                    );
             startActivity(intent);
         });
 
-        // Abrir la pantalla de Ajustes y Seguridad
+        btnCallHistory.setOnClickListener(v -> {
+            Intent intent =
+                    new Intent(
+                            ProfileActivity.this,
+                            CallHistoryActivity.class
+                    );
+            startActivity(intent);
+        });
+
         btnSettings.setOnClickListener(v -> {
-            Intent intent = new Intent(ProfileActivity.this, SettingsActivity.class);
+            Intent intent =
+                    new Intent(
+                            ProfileActivity.this,
+                            SettingsActivity.class
+                    );
             startActivity(intent);
         });
 
-        // Abrir la pantalla de Términos y Condiciones
         btnTerms.setOnClickListener(v -> {
-            Intent intent = new Intent(ProfileActivity.this, TermsActivity.class);
+            Intent intent =
+                    new Intent(
+                            ProfileActivity.this,
+                            TermsActivity.class
+                    );
             startActivity(intent);
         });
 
-        // Abrir la pantalla de Acerca de
         btnAbout.setOnClickListener(v -> {
-            Intent intent = new Intent(ProfileActivity.this, AboutActivity.class);
+            Intent intent =
+                    new Intent(
+                            ProfileActivity.this,
+                            AboutActivity.class
+                    );
             startActivity(intent);
         });
 
         btnLogout.setOnClickListener(v -> logoutUser());
 
         bottomNavigation.setOnItemSelectedListener(item -> {
+
             int itemId = item.getItemId();
+
             if (itemId == R.id.nav_home) {
-                Intent intent = new Intent(ProfileActivity.this, MainActivity.class);
-                intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+
+                Intent intent =
+                        new Intent(
+                                ProfileActivity.this,
+                                MainActivity.class
+                        );
+
+                intent.setFlags(
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                );
+
                 startActivity(intent);
                 finish();
+
                 return true;
+
             } else if (itemId == R.id.nav_profile) {
+
                 return true;
             }
+
             return false;
         });
     }
 
     private void logoutUser() {
-        // 1. Limpiar preferencias generales
-        SharedPreferences preferences = getSharedPreferences("starssenger_prefs", Context.MODE_PRIVATE);
+
+        SharedPreferences preferences =
+                getSharedPreferences(
+                        "starssenger_prefs",
+                        Context.MODE_PRIVATE
+                );
+
         preferences.edit().clear().apply();
 
-        // 2. Eliminar claves criptográficas guardadas
         try {
-            MasterKey masterKey = new MasterKey.Builder(this)
-                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                    .build();
 
-            SharedPreferences securePrefs = EncryptedSharedPreferences.create(
-                    this,
-                    "starssenger_secure_prefs",
-                    masterKey,
-                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            );
+            MasterKey masterKey =
+                    new MasterKey.Builder(this)
+                            .setKeyScheme(
+                                    MasterKey.KeyScheme.AES256_GCM
+                            )
+                            .build();
+
+            SharedPreferences securePrefs =
+                    EncryptedSharedPreferences.create(
+                            this,
+                            "starssenger_secure_prefs",
+                            masterKey,
+                            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                    );
+
             securePrefs.edit().clear().apply();
+
         } catch (Exception e) {
             e.printStackTrace();
         }
 
-        // 3. Redirigir al Onboarding
-        Intent intent = new Intent(ProfileActivity.this, OnboardingActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        Intent intent =
+                new Intent(
+                        ProfileActivity.this,
+                        OnboardingActivity.class
+                );
+
+        intent.setFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_CLEAR_TASK
+        );
+
         startActivity(intent);
         finish();
     }
